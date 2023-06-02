@@ -1,4 +1,4 @@
-module beep
+module github.com/cuotos/beeptest
 
 go 1.20
 
