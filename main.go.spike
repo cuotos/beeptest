@@ -1,0 +1,118 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/faiface/beep"
+	"github.com/faiface/beep/effects"
+	"github.com/faiface/beep/generators"
+	"github.com/faiface/beep/speaker"
+)
+
+const (
+	wordsPerMin              = 15
+	farnsworthMultiplier int = 1
+
+	sampleRate = 44100
+)
+
+var (
+	tone beep.Streamer
+	buf  *beep.Buffer
+)
+
+// wpm returns a duration of a Dit to satisfy the required words per minute
+func wpm(wpm int) time.Duration {
+	msPerDir := 60000 / (50 * wpm)
+	return time.Millisecond * time.Duration(msPerDir)
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
+
+	sr := beep.SampleRate(sampleRate)
+	tone, _ = generators.SinTone(sr, 700)
+
+	speaker.Init(sr, sr.N(time.Second/10))
+
+	buf = beep.NewBuffer(beep.Format{
+		SampleRate:  sr,
+		NumChannels: 1,
+		Precision:   1,
+	})
+
+	// the buffer contains a dash, and dits just play a third of that, so the buffer is 3 dits long
+	buf.Append(beep.Take(sr.N(wpm(wordsPerMin)*3), tone))
+
+	done := make(chan bool)
+
+	speaker.Play(beep.Seq(beep.Loop(2, paris()), beep.Callback(func() { done <- true })))
+
+	<-done
+	time.Sleep(time.Second)
+	return nil
+}
+
+func dot() beep.Streamer {
+	return beep.Seq(
+		buf.Streamer(0, buf.Len()/3),
+	)
+}
+
+func dash() beep.Streamer {
+	return beep.Seq(
+		buf.Streamer(0, buf.Len()),
+	)
+}
+
+func intraSpace() beep.Streamer {
+	return beep.Silence(buf.Len() / 3)
+}
+
+func charSpace() beep.Streamer {
+	l := buf.Len()
+
+	farnLength := l * farnsworthMultiplier
+	return beep.Silence(farnLength)
+}
+
+func wordSpace() beep.Streamer {
+	l := (buf.Len() / 3) * 7
+
+	farnLength := l * farnsworthMultiplier
+	return beep.Silence(farnLength)
+}
+
+// smush everything into a buffer then can use seeker / loop etc
+func paris() beep.StreamSeeker {
+	b := beep.NewBuffer(beep.Format{
+		SampleRate:  sampleRate,
+		NumChannels: 1,
+		Precision:   1,
+	})
+
+	b.Append(&effects.Volume{
+		Streamer: beep.Seq(
+			dot(), intraSpace(), dash(), intraSpace(), dash(), intraSpace(), dot(), charSpace(),
+			dot(), intraSpace(), dash(), intraSpace(), charSpace(),
+			dot(), intraSpace(), dash(), intraSpace(), dot(), intraSpace(), charSpace(),
+			dot(), intraSpace(), dot(), intraSpace(), charSpace(),
+			dot(), intraSpace(), dot(), intraSpace(), dot(),
+			wordSpace(),
+		),
+		Base:   10,
+		Volume: -0.5,
+		Silent: false,
+	})
+
+	fmt.Println(b.Len())
+
+	return b.Streamer(0, b.Len())
+}
